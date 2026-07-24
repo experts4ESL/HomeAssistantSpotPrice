@@ -142,6 +142,7 @@ def parse_payload(
     timezone: ZoneInfo,
     handling_fee: Decimal,
     fetched_at: datetime,
+    reference_time: datetime | None = None,
 ) -> PriceDataset:
     """Validate an API payload and convert it into an immutable dataset."""
     if not isinstance(payload, dict):
@@ -154,8 +155,10 @@ def parse_payload(
         raise OekoSpotInvalidDataError(f"Unexpected tariff: {tariff!r}")
     if unit != "ct/kWh":
         raise OekoSpotInvalidDataError(f"Unexpected unit: {unit!r}")
-    if not isinstance(interval_minutes, int) or interval_minutes <= 0:
-        raise OekoSpotInvalidDataError("Invalid interval length")
+    if interval_minutes != 15:
+        raise OekoSpotInvalidDataError(
+            f"Unexpected interval length: {interval_minutes!r}"
+        )
     if not isinstance(data, list):
         raise OekoSpotInvalidDataError("Missing price data list")
 
@@ -173,6 +176,12 @@ def parse_payload(
                 "Intervals require timezone and finite value"
             )
         start_utc = start.astimezone(UTC)
+        if (
+            start_utc.minute % interval_minutes
+            or start_utc.second
+            or start_utc.microsecond
+        ):
+            raise OekoSpotInvalidDataError("Price interval is not quarter-hour aligned")
         start = start_utc.astimezone(timezone)
         end = (start_utc + timedelta(minutes=interval_minutes)).astimezone(timezone)
         item = PriceInterval(start, end, value, value + handling_fee)
@@ -190,7 +199,7 @@ def parse_payload(
         if current.start.astimezone(UTC) < previous.end.astimezone(UTC):
             raise OekoSpotInvalidDataError("Overlapping price intervals")
 
-    today = fetched_at.astimezone(timezone).date()
+    today = (reference_time or fetched_at).astimezone(timezone).date()
     tomorrow = today + timedelta(days=1)
     return PriceDataset(
         tariff=tariff,
@@ -212,16 +221,21 @@ def _is_day_complete(
     interval_minutes: int,
 ) -> bool:
     """Check coverage using elapsed UTC time, including DST days."""
-    local_items = [
-        item for item in intervals if item.start.astimezone(timezone).date() == day
-    ]
     start = datetime.combine(day, datetime.min.time(), timezone)
     end = datetime.combine(day + timedelta(days=1), datetime.min.time(), timezone)
-    expected = int(
-        (end.astimezone(ZoneInfo("UTC")) - start.astimezone(ZoneInfo("UTC")))
-        / timedelta(minutes=interval_minutes)
-    )
-    return len(local_items) == expected
+    start_utc = start.astimezone(UTC)
+    end_utc = end.astimezone(UTC)
+    expected_starts: set[datetime] = set()
+    cursor = start_utc
+    while cursor < end_utc:
+        expected_starts.add(cursor)
+        cursor += timedelta(minutes=interval_minutes)
+    actual_starts = {
+        item.start.astimezone(UTC)
+        for item in intervals
+        if item.start.astimezone(timezone).date() == day
+    }
+    return actual_starts == expected_starts
 
 
 def day_statistics(
@@ -282,7 +296,9 @@ def price_level(dataset: PriceDataset, now: datetime, timezone: ZoneInfo) -> str
     )
     if not values:
         return None
-    rank = sum(value <= current.tariff_price_ct_kwh for value in values) / len(values)
+    less = sum(value < current.tariff_price_ct_kwh for value in values)
+    equal = sum(value == current.tariff_price_ct_kwh for value in values)
+    rank = (less + equal / 2) / len(values)
     if rank <= 0.2:
         return "very_low"
     if rank <= 0.4:
@@ -292,3 +308,53 @@ def price_level(dataset: PriceDataset, now: datetime, timezone: ZoneInfo) -> str
     if rank <= 0.8:
         return "high"
     return "very_high"
+
+
+def dataset_to_dict(dataset: PriceDataset) -> dict[str, Any]:
+    """Serialize a dataset for Home Assistant storage."""
+    return {
+        "tariff": dataset.tariff,
+        "unit": dataset.unit,
+        "interval": dataset.interval_minutes,
+        "fetched_at": dataset.fetched_at.isoformat(),
+        "data": [
+            {
+                "date": item.start.isoformat(),
+                "value": str(item.market_price_ct_kwh),
+            }
+            for item in dataset.intervals
+        ],
+    }
+
+
+def dataset_from_dict(
+    stored: Any,
+    *,
+    expected_tariff: str,
+    timezone: ZoneInfo,
+    handling_fee: Decimal,
+    reference_time: datetime,
+) -> PriceDataset:
+    """Restore and revalidate a stored dataset."""
+    if not isinstance(stored, dict):
+        raise OekoSpotInvalidDataError("Stored dataset must be an object")
+    try:
+        fetched_at = datetime.fromisoformat(stored["fetched_at"])
+    except (KeyError, TypeError, ValueError) as err:
+        raise OekoSpotInvalidDataError("Stored fetch timestamp is invalid") from err
+    if fetched_at.tzinfo is None:
+        raise OekoSpotInvalidDataError("Stored fetch timestamp requires a timezone")
+    payload = {
+        "tariff": stored.get("tariff"),
+        "unit": stored.get("unit"),
+        "interval": stored.get("interval"),
+        "data": stored.get("data"),
+    }
+    return parse_payload(
+        payload,
+        expected_tariff=expected_tariff,
+        timezone=timezone,
+        handling_fee=handling_fee,
+        fetched_at=fetched_at,
+        reference_time=reference_time,
+    )

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -14,8 +14,9 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.event import async_track_point_in_utc_time
 
 from . import OekoSpotConfigEntry
 from .api import PriceDataset, cheapest_window, day_statistics, price_level
@@ -70,7 +71,6 @@ SENSORS = (
         key="current_price",
         translation_key="current_price",
         native_unit_of_measurement="ct/kWh",
-        device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=3,
         value_fn=_current,
@@ -79,7 +79,6 @@ SENSORS = (
         key="epex_price",
         translation_key="epex_price",
         native_unit_of_measurement="ct/kWh",
-        device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=3,
         value_fn=_epex,
@@ -88,7 +87,6 @@ SENSORS = (
         key="next_price",
         translation_key="next_price",
         native_unit_of_measurement="ct/kWh",
-        device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=3,
         value_fn=_next,
@@ -98,7 +96,6 @@ SENSORS = (
             key=key,
             translation_key=key,
             native_unit_of_measurement="ct/kWh",
-            device_class=SensorDeviceClass.MONETARY,
             state_class=SensorStateClass.MEASUREMENT,
             suggested_display_precision=3,
             value_fn=_stat(index),
@@ -148,11 +145,42 @@ class OekoSpotSensor(OekoSpotEntity, SensorEntity):
         super().__init__(coordinator, entry)
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
+        self._unsub_interval = None
+
+    async def async_added_to_hass(self) -> None:
+        """Schedule state recalculation exactly at each interval boundary."""
+        await super().async_added_to_hass()
+        self._schedule_next_interval()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Cancel the interval-boundary listener."""
+        if self._unsub_interval is not None:
+            self._unsub_interval()
+            self._unsub_interval = None
+        await super().async_will_remove_from_hass()
+
+    @callback
+    def _schedule_next_interval(self) -> None:
+        """Schedule the next quarter-hour state update."""
+        now = datetime.now(UTC)
+        seconds = self.coordinator.data.interval_minutes * 60
+        next_timestamp = (int(now.timestamp()) // seconds + 1) * seconds
+        next_boundary = datetime.fromtimestamp(next_timestamp, UTC)
+        self._unsub_interval = async_track_point_in_utc_time(
+            self.hass, self._handle_interval_boundary, next_boundary
+        )
+
+    @callback
+    def _handle_interval_boundary(self, now: datetime) -> None:
+        """Write a new state without performing another API request."""
+        self._unsub_interval = None
+        self.async_write_ha_state()
+        self._schedule_next_interval()
 
     @property
     def native_value(self):
         """Return the calculated state."""
-        now = datetime.now(self.coordinator.data.fetched_at.tzinfo)
+        now = datetime.now(UTC)
         timezone = ZoneInfo(self.hass.config.time_zone)
         return self.entity_description.value_fn(self.coordinator.data, now, timezone)
 
@@ -161,7 +189,7 @@ class OekoSpotSensor(OekoSpotEntity, SensorEntity):
         """Return compact metadata or window details."""
         data = self.coordinator.data
         timezone = ZoneInfo(self.hass.config.time_zone)
-        now = datetime.now(data.fetched_at.tzinfo)
+        now = datetime.now(UTC)
         if self.entity_description.key == "current_price":
             current = data.current(now)
             if current is None:
@@ -179,7 +207,11 @@ class OekoSpotSensor(OekoSpotEntity, SensorEntity):
                 "data_timestamp": data.fetched_at.isoformat(),
                 "tomorrow_available": data.tomorrow_complete,
                 "data_age_minutes": round(
-                    (now - data.fetched_at).total_seconds() / 60, 1
+                    (
+                        now - data.fetched_at.astimezone(UTC)
+                    ).total_seconds()
+                    / 60,
+                    1,
                 ),
             }
         minutes = {"cheapest_1_hour": 60, "cheapest_2_hours": 120}.get(

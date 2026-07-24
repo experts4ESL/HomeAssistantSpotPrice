@@ -7,12 +7,13 @@ name = "home-assistant-oeko-spot"
 version = "0.1.0"
 description = "Home Assistant custom integration for the Austrian smartENERGY spot-price API"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14.2"
 license = "MIT"
 dependencies = ["aiohttp>=3.11"]
 
 [project.optional-dependencies]
 test = [
+  "homeassistant==2026.7.2",
   "pytest>=8.3",
   "pytest-cov>=6.0",
   "ruff>=0.11"
@@ -24,8 +25,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 88
-target-version = "py313"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
-

@@ -42,8 +42,5 @@ class OekoSpotEntity(CoordinatorEntity[OekoSpotCoordinator]):
         max_age = self._entry.options.get(
             CONF_STALE_AFTER_HOURS, DEFAULT_STALE_AFTER_HOURS
         )
-        age = datetime.now(UTC) - self.coordinator.data.fetched_at.astimezone(
-            UTC
-        )
+        age = datetime.now(UTC) - self.coordinator.data.fetched_at.astimezone(UTC)
         return age.total_seconds() <= max_age * 3600
-

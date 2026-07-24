@@ -24,6 +24,8 @@ Abgaben und sonstige lokale Gebühren sind nicht enthalten.
 
 ## Installation über HACS
 
+Voraussetzung: Home Assistant 2026.7.2 oder neuer.
+
 1. In HACS **Benutzerdefinierte Repositories** öffnen.
 2. `https://github.com/experts4ESL/HomeAssistantSpotPrice` eintragen und den
    Typ **Integration** wählen.
@@ -69,6 +71,9 @@ Kennungen bleiben unabhängig von Sprache oder Umbenennung stabil.
   System erreichbar sein.
 - Bei einem temporären Ausfall bleiben zuletzt erfolgreich geladene Werte bis
   zur konfigurierten Ablaufgrenze verfügbar.
+- Nach einem Home-Assistant-Neustart können die zuletzt gespeicherten Werte auch
+  ohne API-Verbindung wiederhergestellt werden. Nach Ablauf der konfigurierten
+  Grenze werden sie nicht mehr verwendet.
 - Strukturänderungen oder unerwartete Einheiten der API werden bewusst als
   Fehler behandelt, damit keine falschen Preise angezeigt werden.
 - Vor dem Aktualisieren einer Custom Integration wird ein Home-Assistant-Backup

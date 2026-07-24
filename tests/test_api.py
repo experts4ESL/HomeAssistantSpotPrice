@@ -9,6 +9,8 @@ import pytest
 from custom_components.oeko_spot.api import (
     OekoSpotInvalidDataError,
     cheapest_window,
+    dataset_from_dict,
+    dataset_to_dict,
     day_statistics,
     parse_payload,
     price_level,
@@ -78,6 +80,12 @@ def test_price_level_uses_daily_rank() -> None:
     )
 
 
+def test_equal_prices_have_normal_level() -> None:
+    start = datetime(2026, 7, 24, 0, 0, tzinfo=VIENNA)
+    dataset = parse(payload(start, [5] * 8), start)
+    assert price_level(dataset, start, VIENNA) == "normal"
+
+
 @pytest.mark.parametrize(
     ("day", "count"),
     [
@@ -138,9 +146,48 @@ def test_invalid_metadata(change: dict) -> None:
         parse(raw, start)
 
 
+def test_non_quarter_hour_interval_is_rejected() -> None:
+    start = datetime(2026, 7, 24, 0, 7, tzinfo=VIENNA)
+    with pytest.raises(OekoSpotInvalidDataError):
+        parse(payload(start, [1]), start)
+
+
+def test_non_15_minute_resolution_is_rejected() -> None:
+    start = datetime(2026, 7, 24, tzinfo=VIENNA)
+    with pytest.raises(OekoSpotInvalidDataError):
+        parse(payload(start, [1], interval=30), start)
+
+
 def test_conflicting_duplicate_is_rejected() -> None:
     start = datetime(2026, 7, 24, tzinfo=VIENNA)
     raw = payload(start, [1])
     raw["data"].append({"date": start.isoformat(), "value": 2})
     with pytest.raises(OekoSpotInvalidDataError):
         parse(raw, start)
+
+
+def test_stored_dataset_round_trip_recalculates_fee() -> None:
+    start = datetime(2026, 7, 24, tzinfo=VIENNA)
+    original = parse(payload(start, [1, 2]), start)
+    restored = dataset_from_dict(
+        dataset_to_dict(original),
+        expected_tariff="EPEXSPOTAT",
+        timezone=VIENNA,
+        handling_fee=Decimal("2.5"),
+        reference_time=start,
+    )
+    assert restored.fetched_at == original.fetched_at
+    assert restored.intervals[0].tariff_price_ct_kwh == Decimal("3.5")
+
+
+def test_shifted_full_count_is_not_complete() -> None:
+    day = datetime(2026, 7, 24, tzinfo=VIENNA)
+    raw = payload(day, [1] * 96)
+    raw["data"].pop(4)
+    raw["data"].append(
+        {
+            "date": datetime(2026, 7, 25, 0, 0, tzinfo=VIENNA).isoformat(),
+            "value": 1,
+        }
+    )
+    assert parse(raw, day).today_complete is False
