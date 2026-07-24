@@ -1,0 +1,15 @@
+{
+  "domain": "oeko_spot",
+  "name": "Ökostrom Spot Price",
+  "after_dependencies": [],
+  "codeowners": ["@MRodinLo"],
+  "config_flow": true,
+  "documentation": "https://github.com/experts4ESL/HomeAssistantSpotPrice",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/experts4ESL/HomeAssistantSpotPrice/issues",
+  "loggers": ["custom_components.oeko_spot"],
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.1.0"
+}

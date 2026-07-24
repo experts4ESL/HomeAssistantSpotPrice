@@ -1,0 +1,61 @@
+{
+  "title": "Ökostrom Spot Price",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Ökostrom Spot Price einrichten",
+        "description": "Die Verbindung zur öffentlichen smartENERGY-Preis-API wird geprüft.",
+        "data": {
+          "tariff_name": "Tarifbezeichnung",
+          "api_tariff": "API-Tarifkennung",
+          "handling_fee": "Abwicklungsgebühr (ct/kWh, brutto)",
+          "scan_interval": "Abrufintervall (Minuten)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zu smartENERGY fehlgeschlagen.",
+      "invalid_data": "smartENERGY hat unerwartete oder ungültige Daten geliefert."
+    },
+    "abort": {
+      "already_configured": "Ökostrom Spot Price ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Optionen",
+        "data": {
+          "handling_fee": "Abwicklungsgebühr (ct/kWh, brutto)",
+          "scan_interval": "Abrufintervall (Minuten)",
+          "stale_after_hours": "Werte nach Stunden als veraltet markieren"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "current_price": {"name": "Aktueller Preis"},
+      "epex_price": {"name": "EPEX-Preis"},
+      "next_price": {"name": "Nächster Preis"},
+      "daily_min": {"name": "Tagesminimum"},
+      "daily_max": {"name": "Tagesmaximum"},
+      "daily_average": {"name": "Tagesdurchschnitt"},
+      "cheapest_1_hour": {"name": "Günstigste Stunde"},
+      "cheapest_2_hours": {"name": "Günstigste zwei Stunden"},
+      "price_level": {
+        "name": "Preisniveau",
+        "state": {
+          "very_low": "Sehr niedrig",
+          "low": "Niedrig",
+          "normal": "Normal",
+          "high": "Hoch",
+          "very_high": "Sehr hoch"
+        }
+      }
+    },
+    "binary_sensor": {
+      "tomorrow_available": {"name": "Preise für morgen verfügbar"}
+    }
+  }
+}

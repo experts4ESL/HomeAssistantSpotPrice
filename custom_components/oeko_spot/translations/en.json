@@ -1,0 +1,61 @@
+{
+  "title": "Ökostrom Spot Price",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Ökostrom Spot Price",
+        "description": "The connection to the public smartENERGY price API will be tested.",
+        "data": {
+          "tariff_name": "Tariff name",
+          "api_tariff": "API tariff identifier",
+          "handling_fee": "Handling fee (ct/kWh, gross)",
+          "scan_interval": "Update interval (minutes)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to smartENERGY.",
+      "invalid_data": "smartENERGY returned unexpected or invalid data."
+    },
+    "abort": {
+      "already_configured": "Ökostrom Spot Price is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options",
+        "data": {
+          "handling_fee": "Handling fee (ct/kWh, gross)",
+          "scan_interval": "Update interval (minutes)",
+          "stale_after_hours": "Mark values stale after hours"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "current_price": {"name": "Current price"},
+      "epex_price": {"name": "EPEX price"},
+      "next_price": {"name": "Next price"},
+      "daily_min": {"name": "Daily minimum"},
+      "daily_max": {"name": "Daily maximum"},
+      "daily_average": {"name": "Daily average"},
+      "cheapest_1_hour": {"name": "Cheapest hour"},
+      "cheapest_2_hours": {"name": "Cheapest two hours"},
+      "price_level": {
+        "name": "Price level",
+        "state": {
+          "very_low": "Very low",
+          "low": "Low",
+          "normal": "Normal",
+          "high": "High",
+          "very_high": "Very high"
+        }
+      }
+    },
+    "binary_sensor": {
+      "tomorrow_available": {"name": "Tomorrow prices available"}
+    }
+  }
+}
