@@ -310,6 +310,20 @@ def price_level(dataset: PriceDataset, now: datetime, timezone: ZoneInfo) -> str
     return "very_high"
 
 
+def chart_points(
+    dataset: PriceDataset, day: date, timezone: ZoneInfo
+) -> list[dict[str, str | float]]:
+    """Return compact, JSON-safe chart points for a local day."""
+    return [
+        {
+            "start": item.start.isoformat(),
+            "epex_price": float(item.market_price_ct_kwh),
+            "tariff_price": float(item.tariff_price_ct_kwh),
+        }
+        for item in dataset.for_date(day, timezone)
+    ]
+
+
 def dataset_to_dict(dataset: PriceDataset) -> dict[str, Any]:
     """Serialize a dataset for Home Assistant storage."""
     return {

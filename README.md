@@ -65,6 +65,71 @@ Kennungen bleiben unabhängig von Sprache oder Umbenennung stabil.
 - Preisniveau
 - Binärsensor „Preise für morgen verfügbar“
 
+## Dashboard-Tageskurve
+
+Für eine Kurve mit bereits veröffentlichten zukünftigen Viertelstundenpreisen
+wird die über HACS erhältliche **ApexCharts Card** benötigt. Der Sensor
+`sensor.oeko_spot_price_chart` stellt dafür je eine kompakte Liste für heute und
+morgen bereit.
+
+Nach der Installation der ApexCharts Card kann folgende manuelle Karte in ein
+Dashboard eingefügt werden:
+
+```yaml
+type: custom:apexcharts-card
+graph_span: 24h
+span:
+  start: day
+header:
+  show: true
+  title: Strompreis heute in ct/kWh
+  show_states: true
+now:
+  show: true
+  label: Jetzt
+yaxis:
+  - decimals: 2
+series:
+  - entity: sensor.oeko_spot_price_chart
+    name: Tarifpreis inkl. Abwicklungsgebühr
+    type: area
+    stroke_width: 2
+    opacity: 0.35
+    color: "#36a873"
+    data_generator: |
+      return (entity.attributes.prices_today || []).map((point) => [
+        new Date(point.start).getTime(),
+        point.tariff_price
+      ]);
+  - entity: sensor.oeko_spot_price_chart
+    name: EPEX-Preis
+    type: line
+    stroke_width: 2
+    color: "#ffffff"
+    data_generator: |
+      return (entity.attributes.prices_today || []).map((point) => [
+        new Date(point.start).getTime(),
+        point.epex_price
+      ]);
+```
+
+Falls Home Assistant beim ersten Anlegen eine abweichende Entity-ID vergibt,
+muss `sensor.oeko_spot_price_chart` in der Karte durch die tatsächliche ID des
+Sensors „Preisverlauf“ ersetzt werden.
+
+Da dieser Sensor eine vollständige Tagesliste als Attribute enthält, sollte er
+von der Recorder-Datenbank ausgeschlossen werden:
+
+```yaml
+recorder:
+  exclude:
+    entities:
+      - sensor.oeko_spot_price_chart
+```
+
+Nach einer Änderung an `configuration.yaml` muss Home Assistant neu gestartet
+werden.
+
 ## Fehlerbehebung
 
 - Bei der Einrichtung muss `https://apis.smartenergy.at` vom Home-Assistant-

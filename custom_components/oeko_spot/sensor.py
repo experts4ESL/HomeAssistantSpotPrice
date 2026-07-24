@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -19,8 +19,14 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_point_in_utc_time
 
 from . import OekoSpotConfigEntry
-from .api import PriceDataset, cheapest_window, day_statistics, price_level
-from .const import CONF_HANDLING_FEE, DEFAULT_HANDLING_FEE
+from .api import (
+    PriceDataset,
+    chart_points,
+    cheapest_window,
+    day_statistics,
+    price_level,
+)
+from .const import CONF_HANDLING_FEE, DEFAULT_HANDLING_FEE, DOMAIN
 from .entity import OekoSpotEntity
 
 PriceValue = Callable[[PriceDataset, datetime, ZoneInfo], Any]
@@ -115,6 +121,11 @@ SENSORS = (
         value_fn=_window(120),
     ),
     OekoSpotSensorDescription(
+        key="price_chart",
+        translation_key="price_chart",
+        value_fn=lambda data, now, tz: now.astimezone(tz).date().isoformat(),
+    ),
+    OekoSpotSensorDescription(
         key="price_level",
         translation_key="price_level",
         device_class=SensorDeviceClass.ENUM,
@@ -145,6 +156,8 @@ class OekoSpotSensor(OekoSpotEntity, SensorEntity):
         super().__init__(coordinator, entry)
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
+        if description.key == "price_chart":
+            self._attr_suggested_object_id = f"{DOMAIN}_price_chart"
         self._unsub_interval = None
 
     async def async_added_to_hass(self) -> None:
@@ -213,6 +226,16 @@ class OekoSpotSensor(OekoSpotEntity, SensorEntity):
                     / 60,
                     1,
                 ),
+            }
+        if self.entity_description.key == "price_chart":
+            today = now.astimezone(timezone).date()
+            tomorrow = today + timedelta(days=1)
+            return {
+                "unit": "ct/kWh",
+                "source": "smartENERGY",
+                "prices_today": chart_points(data, today, timezone),
+                "prices_tomorrow": chart_points(data, tomorrow, timezone),
+                "tomorrow_available": data.tomorrow_complete,
             }
         minutes = {"cheapest_1_hour": 60, "cheapest_2_hours": 120}.get(
             self.entity_description.key

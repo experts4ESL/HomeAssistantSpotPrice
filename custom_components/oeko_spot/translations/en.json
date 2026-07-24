@@ -43,6 +43,7 @@
       "daily_average": {"name": "Daily average"},
       "cheapest_1_hour": {"name": "Cheapest hour"},
       "cheapest_2_hours": {"name": "Cheapest two hours"},
+      "price_chart": {"name": "Price chart"},
       "price_level": {
         "name": "Price level",
         "state": {

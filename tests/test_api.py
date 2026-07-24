@@ -8,6 +8,7 @@ import pytest
 
 from custom_components.oeko_spot.api import (
     OekoSpotInvalidDataError,
+    chart_points,
     cheapest_window,
     dataset_from_dict,
     dataset_to_dict,
@@ -178,6 +179,24 @@ def test_stored_dataset_round_trip_recalculates_fee() -> None:
     )
     assert restored.fetched_at == original.fetched_at
     assert restored.intervals[0].tariff_price_ct_kwh == Decimal("3.5")
+
+
+def test_chart_points_are_json_safe() -> None:
+    start = datetime(2026, 7, 24, tzinfo=VIENNA)
+    dataset = parse(payload(start, [1, 2]), start)
+    points = chart_points(dataset, start.date(), VIENNA)
+    assert points == [
+        {
+            "start": "2026-07-24T00:00:00+02:00",
+            "epex_price": 1.0,
+            "tariff_price": 2.8,
+        },
+        {
+            "start": "2026-07-24T00:15:00+02:00",
+            "epex_price": 2.0,
+            "tariff_price": 3.8,
+        },
+    ]
 
 
 def test_shifted_full_count_is_not_complete() -> None:
