@@ -28,7 +28,10 @@
         "data": {
           "handling_fee": "Abwicklungsgebühr (ct/kWh, brutto)",
           "scan_interval": "Abrufintervall (Minuten)",
-          "stale_after_hours": "Werte nach Stunden als veraltet markieren"
+          "stale_after_hours": "Werte nach Stunden als veraltet markieren",
+          "low_plateau_percentile": "Unterer Preisbereich für niedrige Plateaus (%)",
+          "high_plateau_percentile": "Oberer Preisbereich für hohe Plateaus (%)",
+          "minimum_plateau_minutes": "Mindestdauer eines Plateaus (Minuten)"
         }
       }
     }
@@ -44,6 +47,9 @@
       "cheapest_1_hour": {"name": "Günstigste Stunde"},
       "cheapest_2_hours": {"name": "Günstigste zwei Stunden"},
       "price_chart": {"name": "Preisverlauf"},
+      "next_low_plateau": {"name": "Nächstes niedriges Preisplateau"},
+      "next_high_plateau": {"name": "Nächstes hohes Preisplateau"},
+      "best_price_cycle": {"name": "Beste Preisspanne"},
       "price_level": {
         "name": "Preisniveau",
         "state": {
@@ -56,7 +62,9 @@
       }
     },
     "binary_sensor": {
-      "tomorrow_available": {"name": "Preise für morgen verfügbar"}
+      "tomorrow_available": {"name": "Preise für morgen verfügbar"},
+      "low_plateau_active": {"name": "Niedriges Preisplateau aktiv"},
+      "high_plateau_active": {"name": "Hohes Preisplateau aktiv"}
     }
   }
 }

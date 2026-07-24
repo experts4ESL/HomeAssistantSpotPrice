@@ -14,19 +14,32 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-from homeassistant.helpers.event import async_track_point_in_utc_time
 
 from . import OekoSpotConfigEntry
 from .api import (
     PriceDataset,
+    PricePlateau,
+    best_price_cycle,
     chart_points,
     cheapest_window,
     day_statistics,
+    find_price_plateaus,
+    plateau_to_dict,
     price_level,
 )
-from .const import CONF_HANDLING_FEE, DEFAULT_HANDLING_FEE, DOMAIN
+from .const import (
+    CONF_HANDLING_FEE,
+    CONF_HIGH_PLATEAU_PERCENTILE,
+    CONF_LOW_PLATEAU_PERCENTILE,
+    CONF_MIN_PLATEAU_MINUTES,
+    DEFAULT_HANDLING_FEE,
+    DEFAULT_HIGH_PLATEAU_PERCENTILE,
+    DEFAULT_LOW_PLATEAU_PERCENTILE,
+    DEFAULT_MIN_PLATEAU_MINUTES,
+    DOMAIN,
+)
 from .entity import OekoSpotEntity
 
 PriceValue = Callable[[PriceDataset, datetime, ZoneInfo], Any]
@@ -126,6 +139,26 @@ SENSORS = (
         value_fn=lambda data, now, tz: now.astimezone(tz).date().isoformat(),
     ),
     OekoSpotSensorDescription(
+        key="next_low_plateau",
+        translation_key="next_low_plateau",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda data, now, tz: None,
+    ),
+    OekoSpotSensorDescription(
+        key="next_high_plateau",
+        translation_key="next_high_plateau",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda data, now, tz: None,
+    ),
+    OekoSpotSensorDescription(
+        key="best_price_cycle",
+        translation_key="best_price_cycle",
+        native_unit_of_measurement="ct/kWh",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=3,
+        value_fn=lambda data, now, tz: None,
+    ),
+    OekoSpotSensorDescription(
         key="price_level",
         translation_key="price_level",
         device_class=SensorDeviceClass.ENUM,
@@ -158,44 +191,79 @@ class OekoSpotSensor(OekoSpotEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
         if description.key == "price_chart":
             self._attr_suggested_object_id = f"{DOMAIN}_price_chart"
-        self._unsub_interval = None
-
-    async def async_added_to_hass(self) -> None:
-        """Schedule state recalculation exactly at each interval boundary."""
-        await super().async_added_to_hass()
-        self._schedule_next_interval()
-
-    async def async_will_remove_from_hass(self) -> None:
-        """Cancel the interval-boundary listener."""
-        if self._unsub_interval is not None:
-            self._unsub_interval()
-            self._unsub_interval = None
-        await super().async_will_remove_from_hass()
-
-    @callback
-    def _schedule_next_interval(self) -> None:
-        """Schedule the next quarter-hour state update."""
-        now = datetime.now(UTC)
-        seconds = self.coordinator.data.interval_minutes * 60
-        next_timestamp = (int(now.timestamp()) // seconds + 1) * seconds
-        next_boundary = datetime.fromtimestamp(next_timestamp, UTC)
-        self._unsub_interval = async_track_point_in_utc_time(
-            self.hass, self._handle_interval_boundary, next_boundary
-        )
-
-    @callback
-    def _handle_interval_boundary(self, now: datetime) -> None:
-        """Write a new state without performing another API request."""
-        self._unsub_interval = None
-        self.async_write_ha_state()
-        self._schedule_next_interval()
 
     @property
     def native_value(self):
         """Return the calculated state."""
         now = datetime.now(UTC)
         timezone = ZoneInfo(self.hass.config.time_zone)
+        if self.entity_description.key in {
+            "next_low_plateau",
+            "next_high_plateau",
+        }:
+            kind = (
+                "low"
+                if self.entity_description.key == "next_low_plateau"
+                else "high"
+            )
+            plateau = self._next_plateau(kind, now, timezone)
+            return plateau.start if plateau else None
+        if self.entity_description.key == "best_price_cycle":
+            cycle = self._best_cycle(now, timezone)
+            return round(cycle.gross_spread, 4) if cycle else None
         return self.entity_description.value_fn(self.coordinator.data, now, timezone)
+
+    def _plateaus(
+        self, kind: str, day, timezone: ZoneInfo
+    ) -> tuple[PricePlateau, ...]:
+        percentile_key = (
+            CONF_LOW_PLATEAU_PERCENTILE
+            if kind == "low"
+            else CONF_HIGH_PLATEAU_PERCENTILE
+        )
+        percentile_default = (
+            DEFAULT_LOW_PLATEAU_PERCENTILE
+            if kind == "low"
+            else DEFAULT_HIGH_PLATEAU_PERCENTILE
+        )
+        return find_price_plateaus(
+            self.coordinator.data,
+            day,
+            timezone,
+            kind=kind,
+            percentile=self._entry.options.get(
+                percentile_key, percentile_default
+            )
+            / 100,
+            minimum_minutes=self._entry.options.get(
+                CONF_MIN_PLATEAU_MINUTES, DEFAULT_MIN_PLATEAU_MINUTES
+            ),
+        )
+
+    def _next_plateau(
+        self, kind: str, now: datetime, timezone: ZoneInfo
+    ) -> PricePlateau | None:
+        today = now.astimezone(timezone).date()
+        candidates = (
+            *self._plateaus(kind, today, timezone),
+            *self._plateaus(kind, today + timedelta(days=1), timezone),
+        )
+        future = [
+            item for item in candidates if item.end.astimezone(UTC) > now
+        ]
+        return min(future, key=lambda item: item.start.astimezone(UTC), default=None)
+
+    def _best_cycle(self, now: datetime, timezone: ZoneInfo):
+        today = now.astimezone(timezone).date()
+        low = (
+            *self._plateaus("low", today, timezone),
+            *self._plateaus("low", today + timedelta(days=1), timezone),
+        )
+        high = (
+            *self._plateaus("high", today, timezone),
+            *self._plateaus("high", today + timedelta(days=1), timezone),
+        )
+        return best_price_cycle(low, high)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
@@ -230,12 +298,70 @@ class OekoSpotSensor(OekoSpotEntity, SensorEntity):
         if self.entity_description.key == "price_chart":
             today = now.astimezone(timezone).date()
             tomorrow = today + timedelta(days=1)
+            low_today = self._plateaus("low", today, timezone)
+            high_today = self._plateaus("high", today, timezone)
+            low_tomorrow = self._plateaus("low", tomorrow, timezone)
+            high_tomorrow = self._plateaus("high", tomorrow, timezone)
+            cycle = best_price_cycle(
+                (*low_today, *low_tomorrow),
+                (*high_today, *high_tomorrow),
+            )
             return {
                 "unit": "ct/kWh",
                 "source": "smartENERGY",
                 "prices_today": chart_points(data, today, timezone),
                 "prices_tomorrow": chart_points(data, tomorrow, timezone),
+                "low_plateaus_today": [
+                    plateau_to_dict(item) for item in low_today
+                ],
+                "high_plateaus_today": [
+                    plateau_to_dict(item) for item in high_today
+                ],
+                "low_plateaus_tomorrow": [
+                    plateau_to_dict(item) for item in low_tomorrow
+                ],
+                "high_plateaus_tomorrow": [
+                    plateau_to_dict(item) for item in high_tomorrow
+                ],
+                "best_price_cycle": (
+                    {
+                        "charge": plateau_to_dict(cycle.charge),
+                        "discharge": plateau_to_dict(cycle.discharge),
+                        "gross_spread": round(cycle.gross_spread, 4),
+                    }
+                    if cycle
+                    else None
+                ),
                 "tomorrow_available": data.tomorrow_complete,
+            }
+        if self.entity_description.key in {
+            "next_low_plateau",
+            "next_high_plateau",
+        }:
+            kind = (
+                "low"
+                if self.entity_description.key == "next_low_plateau"
+                else "high"
+            )
+            plateau = self._next_plateau(kind, now, timezone)
+            if plateau is None:
+                return None
+            attributes = plateau_to_dict(plateau)
+            attributes["active"] = (
+                plateau.start.astimezone(UTC)
+                <= now
+                < plateau.end.astimezone(UTC)
+            )
+            return attributes
+        if self.entity_description.key == "best_price_cycle":
+            cycle = self._best_cycle(now, timezone)
+            if cycle is None:
+                return None
+            return {
+                "charge": plateau_to_dict(cycle.charge),
+                "discharge": plateau_to_dict(cycle.discharge),
+                "gross_spread": round(cycle.gross_spread, 4),
+                "price_only": True,
             }
         minutes = {"cheapest_1_hour": 60, "cheapest_2_hours": 120}.get(
             self.entity_description.key

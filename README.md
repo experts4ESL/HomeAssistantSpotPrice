@@ -64,6 +64,31 @@ Kennungen bleiben unabhängig von Sprache oder Umbenennung stabil.
   stehen als Attribute bereit
 - Preisniveau
 - Binärsensor „Preise für morgen verfügbar“
+- nächstes zusammenhängendes niedriges Preisplateau
+- nächstes zusammenhängendes hohes Preisplateau
+- Binärsensoren für aktuell aktive niedrige und hohe Plateaus
+- bestes rein preisbasiertes Lade-/Entlade-Paar und dessen Bruttospanne
+
+Die Plateau-Erkennung lässt sich in den Integrationsoptionen konfigurieren:
+
+| Einstellung | Standard |
+| --- | --- |
+| Unterer Preisbereich | günstigste 25 % |
+| Oberer Preisbereich | teuerste 25 % |
+| Mindestdauer eines Plateaus | 60 Minuten |
+
+Jedes erkannte Plateau enthält Start, Ende, Dauer, Anzahl der Intervalle,
+Durchschnitt, Minimum, Maximum, Preisspanne, Standardabweichung, Tagesrang,
+Schwellenwert und Abstand zum Tagesdurchschnitt. Der Sensor „Beste Preisspanne“
+verknüpft ausschließlich ein zeitlich früheres niedriges Plateau mit einem
+späteren hohen Plateau. Er berücksichtigt bewusst noch keine Batteriegröße,
+Wirkungsgrade, Verbrauchs- oder PV-Prognosen.
+
+Der Sensor „Preisverlauf“ stellt zusätzlich die Kandidatenlisten
+`low_plateaus_today`, `high_plateaus_today`, `low_plateaus_tomorrow` und
+`high_plateaus_tomorrow` sowie `best_price_cycle` als maschinenlesbare Attribute
+bereit. Ein späterer KI-Controller kann diese Preisinformationen mit Verbrauch,
+PV-Prognose und Batteriedaten kombinieren.
 
 ## Dashboard-Tageskurve
 

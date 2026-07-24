@@ -28,7 +28,10 @@
         "data": {
           "handling_fee": "Handling fee (ct/kWh, gross)",
           "scan_interval": "Update interval (minutes)",
-          "stale_after_hours": "Mark values stale after hours"
+          "stale_after_hours": "Mark values stale after hours",
+          "low_plateau_percentile": "Bottom price range for low plateaus (%)",
+          "high_plateau_percentile": "Top price range for high plateaus (%)",
+          "minimum_plateau_minutes": "Minimum plateau duration (minutes)"
         }
       }
     }
@@ -44,6 +47,9 @@
       "cheapest_1_hour": {"name": "Cheapest hour"},
       "cheapest_2_hours": {"name": "Cheapest two hours"},
       "price_chart": {"name": "Price chart"},
+      "next_low_plateau": {"name": "Next low-price plateau"},
+      "next_high_plateau": {"name": "Next high-price plateau"},
+      "best_price_cycle": {"name": "Best price spread"},
       "price_level": {
         "name": "Price level",
         "state": {
@@ -56,7 +62,9 @@
       }
     },
     "binary_sensor": {
-      "tomorrow_available": {"name": "Tomorrow prices available"}
+      "tomorrow_available": {"name": "Tomorrow prices available"},
+      "low_plateau_active": {"name": "Low-price plateau active"},
+      "high_plateau_active": {"name": "High-price plateau active"}
     }
   }
 }

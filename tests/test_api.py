@@ -8,12 +8,15 @@ import pytest
 
 from custom_components.oeko_spot.api import (
     OekoSpotInvalidDataError,
+    best_price_cycle,
     chart_points,
     cheapest_window,
     dataset_from_dict,
     dataset_to_dict,
     day_statistics,
+    find_price_plateaus,
     parse_payload,
+    plateau_to_dict,
     price_level,
 )
 
@@ -197,6 +200,62 @@ def test_chart_points_are_json_safe() -> None:
             "tariff_price": 3.8,
         },
     ]
+
+
+def test_low_and_high_price_plateaus_and_cycle() -> None:
+    start = datetime(2026, 7, 24, tzinfo=VIENNA)
+    values = [10, 10, 1, 1, 1, 1, 10, 10, 20, 20, 20, 20, 10, 10, 10, 10]
+    dataset = parse(payload(start, values), start)
+    low = find_price_plateaus(
+        dataset,
+        start.date(),
+        VIENNA,
+        kind="low",
+        percentile=0.25,
+        minimum_minutes=60,
+    )
+    high = find_price_plateaus(
+        dataset,
+        start.date(),
+        VIENNA,
+        kind="high",
+        percentile=0.25,
+        minimum_minutes=60,
+    )
+    assert len(low) == 1
+    assert low[0].start == start + timedelta(minutes=30)
+    assert low[0].duration_minutes == 60
+    assert low[0].average == pytest.approx(2.8)
+    assert len(high) == 1
+    assert high[0].start == start + timedelta(hours=2)
+    assert high[0].average == pytest.approx(21.8)
+    cycle = best_price_cycle(low, high)
+    assert cycle is not None
+    assert cycle.gross_spread == pytest.approx(19.0)
+    assert plateau_to_dict(low[0])["rank"] == 1
+
+
+def test_price_cycle_requires_low_before_high() -> None:
+    start = datetime(2026, 7, 24, tzinfo=VIENNA)
+    values = [20, 20, 20, 20, 10, 10, 1, 1, 1, 1, 10, 10]
+    dataset = parse(payload(start, values), start)
+    low = find_price_plateaus(
+        dataset,
+        start.date(),
+        VIENNA,
+        kind="low",
+        percentile=0.34,
+        minimum_minutes=60,
+    )
+    high = find_price_plateaus(
+        dataset,
+        start.date(),
+        VIENNA,
+        kind="high",
+        percentile=0.34,
+        minimum_minutes=60,
+    )
+    assert best_price_cycle(low, high) is None
 
 
 def test_shifted_full_count_is_not_complete() -> None:

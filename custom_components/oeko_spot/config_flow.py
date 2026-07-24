@@ -14,11 +14,17 @@ from .api import OekoSpotConnectionError, OekoSpotError, SmartEnergyApi
 from .const import (
     CONF_API_TARIFF,
     CONF_HANDLING_FEE,
+    CONF_HIGH_PLATEAU_PERCENTILE,
+    CONF_LOW_PLATEAU_PERCENTILE,
+    CONF_MIN_PLATEAU_MINUTES,
     CONF_SCAN_INTERVAL,
     CONF_STALE_AFTER_HOURS,
     CONF_TARIFF_NAME,
     DEFAULT_API_TARIFF,
     DEFAULT_HANDLING_FEE,
+    DEFAULT_HIGH_PLATEAU_PERCENTILE,
+    DEFAULT_LOW_PLATEAU_PERCENTILE,
+    DEFAULT_MIN_PLATEAU_MINUTES,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_STALE_AFTER_HOURS,
     DEFAULT_TARIFF_NAME,
@@ -47,6 +53,13 @@ def _schema(defaults: dict[str, Any]) -> vol.Schema:
             ): vol.All(vol.Coerce(int), vol.Range(min=5, max=180)),
         }
     )
+
+
+def _multiple_of_15(value: int) -> int:
+    """Validate quarter-hour based durations."""
+    if value % 15:
+        raise vol.Invalid("Must be a multiple of 15")
+    return value
 
 
 class OekoSpotConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -113,6 +126,31 @@ class OekoSpotOptionsFlow(config_entries.OptionsFlow):
                         CONF_STALE_AFTER_HOURS, DEFAULT_STALE_AFTER_HOURS
                     ),
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=168)),
+                vol.Required(
+                    CONF_LOW_PLATEAU_PERCENTILE,
+                    default=current.get(
+                        CONF_LOW_PLATEAU_PERCENTILE,
+                        DEFAULT_LOW_PLATEAU_PERCENTILE,
+                    ),
+                ): vol.All(vol.Coerce(int), vol.Range(min=5, max=50)),
+                vol.Required(
+                    CONF_HIGH_PLATEAU_PERCENTILE,
+                    default=current.get(
+                        CONF_HIGH_PLATEAU_PERCENTILE,
+                        DEFAULT_HIGH_PLATEAU_PERCENTILE,
+                    ),
+                ): vol.All(vol.Coerce(int), vol.Range(min=5, max=50)),
+                vol.Required(
+                    CONF_MIN_PLATEAU_MINUTES,
+                    default=current.get(
+                        CONF_MIN_PLATEAU_MINUTES,
+                        DEFAULT_MIN_PLATEAU_MINUTES,
+                    ),
+                ): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(min=15, max=360),
+                    _multiple_of_15,
+                ),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
