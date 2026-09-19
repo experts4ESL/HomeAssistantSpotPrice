@@ -82,6 +82,17 @@ class PriceCycle:
 
 
 @dataclass(frozen=True, slots=True)
+class EnergyPlan:
+    """A future charge/discharge plan for one configurable storage profile."""
+
+    charge: PriceWindow
+    discharge: PriceWindow
+    gross_spread: float
+    net_savings: float
+    round_trip_efficiency: float
+
+
+@dataclass(frozen=True, slots=True)
 class PriceDataset:
     """Validated price data returned by smartENERGY."""
 
@@ -271,8 +282,7 @@ def day_statistics(
 ) -> tuple[float | None, float | None, float | None]:
     """Return minimum, maximum, and mean tariff price for a local day."""
     values = [
-        float(item.tariff_price_ct_kwh)
-        for item in dataset.for_date(day, timezone)
+        float(item.tariff_price_ct_kwh) for item in dataset.for_date(day, timezone)
     ]
     if not values:
         return None, None, None
@@ -308,9 +318,110 @@ def cheapest_window(
         return None
     candidates.sort(key=lambda item: (item.average, item.start))
     winner = candidates[0]
-    return PriceWindow(
-        winner.start, winner.end, winner.average, winner.total, rank=1
+    return PriceWindow(winner.start, winner.end, winner.average, winner.total, rank=1)
+
+
+def _contiguous_windows(
+    items: tuple[PriceInterval, ...], interval_minutes: int, minutes: int
+) -> tuple[PriceWindow, ...]:
+    """Build every complete contiguous window of the requested duration."""
+    count = minutes // interval_minutes
+    if count <= 0 or count * interval_minutes != minutes:
+        raise ValueError("Window duration must be a positive interval multiple")
+    candidates: list[PriceWindow] = []
+    for index in range(len(items) - count + 1):
+        window = items[index : index + count]
+        if any(
+            current.start.astimezone(UTC) != previous.end.astimezone(UTC)
+            for previous, current in pairwise(window)
+        ):
+            continue
+        values = [float(item.tariff_price_ct_kwh) for item in window]
+        candidates.append(
+            PriceWindow(
+                start=window[0].start,
+                end=window[-1].end,
+                average=fmean(values),
+                total=sum(values),
+            )
+        )
+    return tuple(candidates)
+
+
+def best_future_energy_plan(
+    dataset: PriceDataset,
+    earliest: datetime,
+    *,
+    charge_minutes: int,
+    discharge_minutes: int,
+    round_trip_efficiency: float,
+) -> EnergyPlan | None:
+    """Find the best fully future charge/discharge windows in loaded data.
+
+    The economic value is expressed per discharged kWh. Charging one usable kWh
+    costs ``charge_price / efficiency``; discharging avoids buying one kWh at
+    the later tariff price. Only complete intervals starting at or after
+    ``earliest`` are considered, so a plan never recommends a partly elapsed
+    interval.
+    """
+    if earliest.tzinfo is None:
+        raise ValueError("Earliest time must be timezone-aware")
+    if not 0 < round_trip_efficiency <= 1:
+        raise ValueError("Round-trip efficiency must be between zero and one")
+
+    earliest_utc = earliest.astimezone(UTC)
+    future_items = tuple(
+        item for item in dataset.intervals if item.start.astimezone(UTC) >= earliest_utc
     )
+    charge_windows = _contiguous_windows(
+        future_items, dataset.interval_minutes, charge_minutes
+    )
+    discharge_windows = _contiguous_windows(
+        future_items, dataset.interval_minutes, discharge_minutes
+    )
+    best_charge: PriceWindow | None = None
+    best_plan: EnergyPlan | None = None
+    charge_index = 0
+    for discharge in discharge_windows:
+        discharge_start = discharge.start.astimezone(UTC)
+        while (
+            charge_index < len(charge_windows)
+            and charge_windows[charge_index].end.astimezone(UTC) <= discharge_start
+        ):
+            charge = charge_windows[charge_index]
+            if best_charge is None or (
+                charge.average,
+                charge.start.timestamp(),
+            ) < (
+                best_charge.average,
+                best_charge.start.timestamp(),
+            ):
+                best_charge = charge
+            charge_index += 1
+        if best_charge is None:
+            continue
+        candidate = EnergyPlan(
+            charge=best_charge,
+            discharge=discharge,
+            gross_spread=discharge.average - best_charge.average,
+            net_savings=(
+                discharge.average - best_charge.average / round_trip_efficiency
+            ),
+            round_trip_efficiency=round_trip_efficiency,
+        )
+        if best_plan is None or (
+            candidate.net_savings,
+            candidate.gross_spread,
+            -candidate.charge.start.timestamp(),
+            -candidate.discharge.start.timestamp(),
+        ) > (
+            best_plan.net_savings,
+            best_plan.gross_spread,
+            -best_plan.charge.start.timestamp(),
+            -best_plan.discharge.start.timestamp(),
+        ):
+            best_plan = candidate
+    return best_plan
 
 
 def price_level(dataset: PriceDataset, now: datetime, timezone: ZoneInfo) -> str | None:
@@ -394,10 +505,9 @@ def find_price_plateaus(
     current: list[PriceInterval] = []
     for item in items:
         value = float(item.tariff_price_ct_kwh)
-        contiguous = (
-            not current
-            or current[-1].end.astimezone(UTC) == item.start.astimezone(UTC)
-        )
+        contiguous = not current or current[-1].end.astimezone(
+            UTC
+        ) == item.start.astimezone(UTC)
         if qualifies(value) and contiguous:
             current.append(item)
             continue
@@ -503,9 +613,35 @@ def plateau_to_dict(plateau: PricePlateau) -> dict[str, str | int | float]:
         "price_stddev": round(plateau.standard_deviation, 4),
         "rank": plateau.rank,
         "threshold": round(plateau.threshold, 4),
-        "delta_from_daily_average": round(
-            plateau.delta_from_daily_average, 4
+        "delta_from_daily_average": round(plateau.delta_from_daily_average, 4),
+    }
+
+
+def energy_plan_to_dict(plan: EnergyPlan) -> dict[str, str | int | float | bool]:
+    """Serialize a storage plan as compact Home Assistant attributes."""
+    return {
+        "charge_start": plan.charge.start.isoformat(),
+        "charge_end": plan.charge.end.isoformat(),
+        "charge_duration_minutes": int(
+            (
+                plan.charge.end.astimezone(UTC) - plan.charge.start.astimezone(UTC)
+            ).total_seconds()
+            // 60
         ),
+        "charge_average_price": round(plan.charge.average, 4),
+        "discharge_start": plan.discharge.start.isoformat(),
+        "discharge_end": plan.discharge.end.isoformat(),
+        "discharge_duration_minutes": int(
+            (
+                plan.discharge.end.astimezone(UTC)
+                - plan.discharge.start.astimezone(UTC)
+            ).total_seconds()
+            // 60
+        ),
+        "discharge_average_price": round(plan.discharge.average, 4),
+        "gross_spread": round(plan.gross_spread, 4),
+        "net_savings": round(plan.net_savings, 4),
+        "round_trip_efficiency_percent": round(plan.round_trip_efficiency * 100, 2),
     }
 
 

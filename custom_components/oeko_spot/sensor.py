@@ -19,25 +19,38 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import OekoSpotConfigEntry
 from .api import (
+    EnergyPlan,
     PriceDataset,
     PricePlateau,
+    best_future_energy_plan,
     best_price_cycle,
     chart_points,
     cheapest_window,
     day_statistics,
+    energy_plan_to_dict,
     find_price_plateaus,
     plateau_to_dict,
     price_level,
 )
 from .const import (
+    CONF_DISCHARGE_WINDOW_MINUTES,
+    CONF_FAST_CHARGE_WINDOW_MINUTES,
     CONF_HANDLING_FEE,
     CONF_HIGH_PLATEAU_PERCENTILE,
     CONF_LOW_PLATEAU_PERCENTILE,
     CONF_MIN_PLATEAU_MINUTES,
+    CONF_MINIMUM_NET_SAVINGS,
+    CONF_ROUND_TRIP_EFFICIENCY,
+    CONF_SLOW_CHARGE_WINDOW_MINUTES,
+    DEFAULT_DISCHARGE_WINDOW_MINUTES,
+    DEFAULT_FAST_CHARGE_WINDOW_MINUTES,
     DEFAULT_HANDLING_FEE,
     DEFAULT_HIGH_PLATEAU_PERCENTILE,
     DEFAULT_LOW_PLATEAU_PERCENTILE,
     DEFAULT_MIN_PLATEAU_MINUTES,
+    DEFAULT_MINIMUM_NET_SAVINGS,
+    DEFAULT_ROUND_TRIP_EFFICIENCY,
+    DEFAULT_SLOW_CHARGE_WINDOW_MINUTES,
     DOMAIN,
 )
 from .entity import OekoSpotEntity
@@ -68,19 +81,15 @@ def _next(data: PriceDataset, now: datetime, _: ZoneInfo):
 
 
 def _stat(index: int) -> PriceValue:
-    return lambda data, now, tz: day_statistics(
-        data, now.astimezone(tz).date(), tz
-    )[index]
+    return lambda data, now, tz: day_statistics(data, now.astimezone(tz).date(), tz)[
+        index
+    ]
 
 
 def _window(minutes: int) -> PriceValue:
     return lambda data, now, tz: (
         result.start
-        if (
-            result := cheapest_window(
-                data, now.astimezone(tz).date(), tz, minutes
-            )
-        )
+        if (result := cheapest_window(data, now.astimezone(tz).date(), tz, minutes))
         else None
     )
 
@@ -159,6 +168,34 @@ SENSORS = (
         value_fn=lambda data, now, tz: None,
     ),
     OekoSpotSensorDescription(
+        key="fast_storage_plan",
+        translation_key="fast_storage_plan",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda data, now, tz: None,
+    ),
+    OekoSpotSensorDescription(
+        key="slow_storage_plan",
+        translation_key="slow_storage_plan",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda data, now, tz: None,
+    ),
+    OekoSpotSensorDescription(
+        key="fast_storage_net_savings",
+        translation_key="fast_storage_net_savings",
+        native_unit_of_measurement="ct/kWh",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=3,
+        value_fn=lambda data, now, tz: None,
+    ),
+    OekoSpotSensorDescription(
+        key="slow_storage_net_savings",
+        translation_key="slow_storage_net_savings",
+        native_unit_of_measurement="ct/kWh",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=3,
+        value_fn=lambda data, now, tz: None,
+    ),
+    OekoSpotSensorDescription(
         key="price_level",
         translation_key="price_level",
         device_class=SensorDeviceClass.ENUM,
@@ -202,20 +239,24 @@ class OekoSpotSensor(OekoSpotEntity, SensorEntity):
             "next_high_plateau",
         }:
             kind = (
-                "low"
-                if self.entity_description.key == "next_low_plateau"
-                else "high"
+                "low" if self.entity_description.key == "next_low_plateau" else "high"
             )
             plateau = self._next_plateau(kind, now, timezone)
             return plateau.start if plateau else None
         if self.entity_description.key == "best_price_cycle":
             cycle = self._best_cycle(now, timezone)
             return round(cycle.gross_spread, 4) if cycle else None
+        profile = self._storage_profile()
+        if profile is not None:
+            plan = self._energy_plan(profile, now)
+            if plan is None:
+                return None
+            if self.entity_description.key.endswith("_plan"):
+                return plan.charge.start
+            return round(plan.net_savings, 4)
         return self.entity_description.value_fn(self.coordinator.data, now, timezone)
 
-    def _plateaus(
-        self, kind: str, day, timezone: ZoneInfo
-    ) -> tuple[PricePlateau, ...]:
+    def _plateaus(self, kind: str, day, timezone: ZoneInfo) -> tuple[PricePlateau, ...]:
         percentile_key = (
             CONF_LOW_PLATEAU_PERCENTILE
             if kind == "low"
@@ -231,9 +272,7 @@ class OekoSpotSensor(OekoSpotEntity, SensorEntity):
             day,
             timezone,
             kind=kind,
-            percentile=self._entry.options.get(
-                percentile_key, percentile_default
-            )
+            percentile=self._entry.options.get(percentile_key, percentile_default)
             / 100,
             minimum_minutes=self._entry.options.get(
                 CONF_MIN_PLATEAU_MINUTES, DEFAULT_MIN_PLATEAU_MINUTES
@@ -248,22 +287,59 @@ class OekoSpotSensor(OekoSpotEntity, SensorEntity):
             *self._plateaus(kind, today, timezone),
             *self._plateaus(kind, today + timedelta(days=1), timezone),
         )
-        future = [
-            item for item in candidates if item.end.astimezone(UTC) > now
-        ]
+        future = [item for item in candidates if item.end.astimezone(UTC) > now]
         return min(future, key=lambda item: item.start.astimezone(UTC), default=None)
 
     def _best_cycle(self, now: datetime, timezone: ZoneInfo):
         today = now.astimezone(timezone).date()
-        low = (
-            *self._plateaus("low", today, timezone),
-            *self._plateaus("low", today + timedelta(days=1), timezone),
+        low = tuple(
+            item
+            for item in (
+                *self._plateaus("low", today, timezone),
+                *self._plateaus("low", today + timedelta(days=1), timezone),
+            )
+            if item.start.astimezone(UTC) >= now
         )
-        high = (
-            *self._plateaus("high", today, timezone),
-            *self._plateaus("high", today + timedelta(days=1), timezone),
+        high = tuple(
+            item
+            for item in (
+                *self._plateaus("high", today, timezone),
+                *self._plateaus("high", today + timedelta(days=1), timezone),
+            )
+            if item.start.astimezone(UTC) >= now
         )
         return best_price_cycle(low, high)
+
+    def _storage_profile(self) -> str | None:
+        """Return the configured planning profile represented by this sensor."""
+        key = self.entity_description.key
+        if key.startswith("fast_storage_"):
+            return "fast"
+        if key.startswith("slow_storage_"):
+            return "slow"
+        return None
+
+    def _energy_plan(self, profile: str, now: datetime) -> EnergyPlan | None:
+        """Calculate a future-only, efficiency-adjusted storage plan."""
+        duration_key, duration_default = (
+            (CONF_FAST_CHARGE_WINDOW_MINUTES, DEFAULT_FAST_CHARGE_WINDOW_MINUTES)
+            if profile == "fast"
+            else (CONF_SLOW_CHARGE_WINDOW_MINUTES, DEFAULT_SLOW_CHARGE_WINDOW_MINUTES)
+        )
+        return best_future_energy_plan(
+            self.coordinator.data,
+            now,
+            charge_minutes=self._entry.options.get(duration_key, duration_default),
+            discharge_minutes=self._entry.options.get(
+                CONF_DISCHARGE_WINDOW_MINUTES,
+                DEFAULT_DISCHARGE_WINDOW_MINUTES,
+            ),
+            round_trip_efficiency=self._entry.options.get(
+                CONF_ROUND_TRIP_EFFICIENCY,
+                DEFAULT_ROUND_TRIP_EFFICIENCY,
+            )
+            / 100,
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
@@ -288,10 +364,7 @@ class OekoSpotSensor(OekoSpotEntity, SensorEntity):
                 "data_timestamp": data.fetched_at.isoformat(),
                 "tomorrow_available": data.tomorrow_complete,
                 "data_age_minutes": round(
-                    (
-                        now - data.fetched_at.astimezone(UTC)
-                    ).total_seconds()
-                    / 60,
+                    (now - data.fetched_at.astimezone(UTC)).total_seconds() / 60,
                     1,
                 ),
             }
@@ -303,20 +376,24 @@ class OekoSpotSensor(OekoSpotEntity, SensorEntity):
             low_tomorrow = self._plateaus("low", tomorrow, timezone)
             high_tomorrow = self._plateaus("high", tomorrow, timezone)
             cycle = best_price_cycle(
-                (*low_today, *low_tomorrow),
-                (*high_today, *high_tomorrow),
+                tuple(
+                    item
+                    for item in (*low_today, *low_tomorrow)
+                    if item.start.astimezone(UTC) >= now
+                ),
+                tuple(
+                    item
+                    for item in (*high_today, *high_tomorrow)
+                    if item.start.astimezone(UTC) >= now
+                ),
             )
             return {
                 "unit": "ct/kWh",
                 "source": "smartENERGY",
                 "prices_today": chart_points(data, today, timezone),
                 "prices_tomorrow": chart_points(data, tomorrow, timezone),
-                "low_plateaus_today": [
-                    plateau_to_dict(item) for item in low_today
-                ],
-                "high_plateaus_today": [
-                    plateau_to_dict(item) for item in high_today
-                ],
+                "low_plateaus_today": [plateau_to_dict(item) for item in low_today],
+                "high_plateaus_today": [plateau_to_dict(item) for item in high_today],
                 "low_plateaus_tomorrow": [
                     plateau_to_dict(item) for item in low_tomorrow
                 ],
@@ -339,18 +416,14 @@ class OekoSpotSensor(OekoSpotEntity, SensorEntity):
             "next_high_plateau",
         }:
             kind = (
-                "low"
-                if self.entity_description.key == "next_low_plateau"
-                else "high"
+                "low" if self.entity_description.key == "next_low_plateau" else "high"
             )
             plateau = self._next_plateau(kind, now, timezone)
             if plateau is None:
                 return None
             attributes = plateau_to_dict(plateau)
             attributes["active"] = (
-                plateau.start.astimezone(UTC)
-                <= now
-                < plateau.end.astimezone(UTC)
+                plateau.start.astimezone(UTC) <= now < plateau.end.astimezone(UTC)
             )
             return attributes
         if self.entity_description.key == "best_price_cycle":
@@ -363,6 +436,26 @@ class OekoSpotSensor(OekoSpotEntity, SensorEntity):
                 "gross_spread": round(cycle.gross_spread, 4),
                 "price_only": True,
             }
+        profile = self._storage_profile()
+        if profile is not None:
+            plan = self._energy_plan(profile, now)
+            if plan is None:
+                return None
+            minimum = self._entry.options.get(
+                CONF_MINIMUM_NET_SAVINGS,
+                DEFAULT_MINIMUM_NET_SAVINGS,
+            )
+            attributes = energy_plan_to_dict(plan)
+            attributes.update(
+                {
+                    "profile": profile,
+                    "minimum_net_savings": minimum,
+                    "economic": plan.net_savings >= minimum,
+                    "future_only": True,
+                    "advisory_only": True,
+                }
+            )
+            return attributes
         minutes = {"cheapest_1_hour": 60, "cheapest_2_hours": 120}.get(
             self.entity_description.key
         )

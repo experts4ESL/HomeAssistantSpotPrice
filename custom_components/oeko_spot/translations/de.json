@@ -31,7 +31,12 @@
           "stale_after_hours": "Werte nach Stunden als veraltet markieren",
           "low_plateau_percentile": "Unterer Preisbereich für niedrige Plateaus (%)",
           "high_plateau_percentile": "Oberer Preisbereich für hohe Plateaus (%)",
-          "minimum_plateau_minutes": "Mindestdauer eines Plateaus (Minuten)"
+          "minimum_plateau_minutes": "Mindestdauer eines Plateaus (Minuten)",
+          "fast_charge_window_minutes": "Schnelles Ladeprofil: Ladefenster (Minuten)",
+          "slow_charge_window_minutes": "Langsames Ladeprofil: Ladefenster (Minuten)",
+          "discharge_window_minutes": "Geplantes Entladefenster (Minuten)",
+          "round_trip_efficiency": "Batterie-Gesamtwirkungsgrad (%)",
+          "minimum_net_savings": "Mindest-Nettoersparnis (ct/kWh)"
         }
       }
     }
@@ -50,6 +55,10 @@
       "next_low_plateau": {"name": "Nächstes niedriges Preisplateau"},
       "next_high_plateau": {"name": "Nächstes hohes Preisplateau"},
       "best_price_cycle": {"name": "Beste Preisspanne"},
+      "fast_storage_plan": {"name": "Schnelles Speicherprofil: Ladeplan"},
+      "slow_storage_plan": {"name": "Langsames Speicherprofil: Ladeplan"},
+      "fast_storage_net_savings": {"name": "Schnelles Speicherprofil: Nettoersparnis"},
+      "slow_storage_net_savings": {"name": "Langsames Speicherprofil: Nettoersparnis"},
       "price_level": {
         "name": "Preisniveau",
         "state": {
@@ -64,7 +73,9 @@
     "binary_sensor": {
       "tomorrow_available": {"name": "Preise für morgen verfügbar"},
       "low_plateau_active": {"name": "Niedriges Preisplateau aktiv"},
-      "high_plateau_active": {"name": "Hohes Preisplateau aktiv"}
+      "high_plateau_active": {"name": "Hohes Preisplateau aktiv"},
+      "fast_storage_cycle_economic": {"name": "Schneller Speicherzyklus wirtschaftlich"},
+      "slow_storage_cycle_economic": {"name": "Langsamer Speicherzyklus wirtschaftlich"}
     }
   }
 }

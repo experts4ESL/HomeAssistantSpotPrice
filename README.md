@@ -68,6 +68,10 @@ Kennungen bleiben unabhängig von Sprache oder Umbenennung stabil.
 - nächstes zusammenhängendes hohes Preisplateau
 - Binärsensoren für aktuell aktive niedrige und hohe Plateaus
 - bestes rein preisbasiertes Lade-/Entlade-Paar und dessen Bruttospanne
+- zwei konfigurierbare, ausschließlich zukünftige Speicherprofile für kurze und
+  lange Ladefenster
+- wirkungsgradbereinigte Nettoersparnis und ein konfigurierbarer
+  Wirtschaftlichkeitsindikator je Speicherprofil
 
 Die Plateau-Erkennung lässt sich in den Integrationsoptionen konfigurieren:
 
@@ -76,6 +80,11 @@ Die Plateau-Erkennung lässt sich in den Integrationsoptionen konfigurieren:
 | Unterer Preisbereich | günstigste 25 % |
 | Oberer Preisbereich | teuerste 25 % |
 | Mindestdauer eines Plateaus | 60 Minuten |
+| Schnelles Ladeprofil | 120 Minuten |
+| Langsames Ladeprofil | 300 Minuten |
+| Geplantes Entladefenster | 180 Minuten |
+| Batterie-Gesamtwirkungsgrad | 85 % |
+| Mindest-Nettoersparnis | 3,0 ct/kWh |
 
 Jedes erkannte Plateau enthält Start, Ende, Dauer, Anzahl der Intervalle,
 Durchschnitt, Minimum, Maximum, Preisspanne, Standardabweichung, Tagesrang,
@@ -89,6 +98,43 @@ Der Sensor „Preisverlauf“ stellt zusätzlich die Kandidatenlisten
 `high_plateaus_tomorrow` sowie `best_price_cycle` als maschinenlesbare Attribute
 bereit. Ein späterer KI-Controller kann diese Preisinformationen mit Verbrauch,
 PV-Prognose und Batteriedaten kombinieren.
+
+## Beratende Batterieplanung
+
+Die Profile „schnell“ und „langsam“ suchen in den noch nicht begonnenen
+Viertelstunden von heute und morgen jeweils ein zusammenhängendes Ladefenster
+und ein zeitlich späteres Entladefenster. In der hier vorgesehenen Anlage steht
+das schnelle Profil für den Wohnungsspeicher und das lange Profil für den auf
+800 W begrenzten Kellerspeicher. Die Dauer beider Profile bleibt in den
+Integrationsoptionen änderbar und kann später aus nutzbarer Kapazität, aktuellem
+SOC und Ladeleistung genauer abgeleitet werden.
+
+Die Nettoersparnis wird pro später abgegebener Kilowattstunde berechnet:
+
+```text
+Entladepreis - Ladepreis / Gesamtwirkungsgrad
+```
+
+Ein Zyklus gilt nur dann als wirtschaftlich, wenn diese bereinigte Ersparnis
+die konfigurierbare Mindest-Nettoersparnis erreicht. Die Berechnung ist bewusst
+rein beratend: Sie kennt weder aktuellen SOC noch Hausverbrauch, PV-Prognose,
+Leistungsgrenzen oder Blackoutreserve und sendet keine Gerätebefehle.
+
+Beide Profile werden unabhängig berechnet und können sich daher zeitlich
+überlappen. Eine ausführende Steuerung muss weiterhin garantieren, dass nur ein
+Speicher aktiv ist, vor jedem Wechsel den alten Speicher sicher auf 0 W setzen
+(`break before make`) und eine Netzeinspeisung anhand des zentralen Zählers
+verhindern.
+
+Neue Entitäten:
+
+- Ladeplan und Nettoersparnis für das schnelle Speicherprofil
+- Ladeplan und Nettoersparnis für das langsame Speicherprofil
+- Binärsensor „Speicherzyklus wirtschaftlich“ für jedes Profil
+
+Die Ladeplan-Sensoren verwenden den Beginn des empfohlenen Ladefensters als
+Zustand. Ladeende, Entladefenster, Durchschnittspreise, Brutto- und
+Nettoersparnis sowie Wirkungsgrad stehen als kompakte Attribute bereit.
 
 ## Dashboard-Tageskurve
 
@@ -154,6 +200,11 @@ recorder:
 
 Nach einer Änderung an `configuration.yaml` muss Home Assistant neu gestartet
 werden.
+
+Der normale Sensor „Aktueller Preis“ bleibt davon unberührt. Sein numerischer
+Zustand wird vom Home-Assistant-Recorder historisiert und eignet sich deshalb
+für langfristige Preisanalysen, ohne die großen Tageslisten des
+Preisverlauf-Sensors in der Datenbank abzulegen.
 
 ## Fehlerbehebung
 

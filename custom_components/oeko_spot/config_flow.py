@@ -13,19 +13,29 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import OekoSpotConnectionError, OekoSpotError, SmartEnergyApi
 from .const import (
     CONF_API_TARIFF,
+    CONF_DISCHARGE_WINDOW_MINUTES,
+    CONF_FAST_CHARGE_WINDOW_MINUTES,
     CONF_HANDLING_FEE,
     CONF_HIGH_PLATEAU_PERCENTILE,
     CONF_LOW_PLATEAU_PERCENTILE,
     CONF_MIN_PLATEAU_MINUTES,
+    CONF_MINIMUM_NET_SAVINGS,
+    CONF_ROUND_TRIP_EFFICIENCY,
     CONF_SCAN_INTERVAL,
+    CONF_SLOW_CHARGE_WINDOW_MINUTES,
     CONF_STALE_AFTER_HOURS,
     CONF_TARIFF_NAME,
     DEFAULT_API_TARIFF,
+    DEFAULT_DISCHARGE_WINDOW_MINUTES,
+    DEFAULT_FAST_CHARGE_WINDOW_MINUTES,
     DEFAULT_HANDLING_FEE,
     DEFAULT_HIGH_PLATEAU_PERCENTILE,
     DEFAULT_LOW_PLATEAU_PERCENTILE,
     DEFAULT_MIN_PLATEAU_MINUTES,
+    DEFAULT_MINIMUM_NET_SAVINGS,
+    DEFAULT_ROUND_TRIP_EFFICIENCY,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_SLOW_CHARGE_WINDOW_MINUTES,
     DEFAULT_STALE_AFTER_HOURS,
     DEFAULT_TARIFF_NAME,
     DOMAIN,
@@ -151,6 +161,53 @@ class OekoSpotOptionsFlow(config_entries.OptionsFlow):
                     vol.Range(min=15, max=360),
                     _multiple_of_15,
                 ),
+                vol.Required(
+                    CONF_FAST_CHARGE_WINDOW_MINUTES,
+                    default=current.get(
+                        CONF_FAST_CHARGE_WINDOW_MINUTES,
+                        DEFAULT_FAST_CHARGE_WINDOW_MINUTES,
+                    ),
+                ): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(min=15, max=720),
+                    _multiple_of_15,
+                ),
+                vol.Required(
+                    CONF_SLOW_CHARGE_WINDOW_MINUTES,
+                    default=current.get(
+                        CONF_SLOW_CHARGE_WINDOW_MINUTES,
+                        DEFAULT_SLOW_CHARGE_WINDOW_MINUTES,
+                    ),
+                ): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(min=15, max=720),
+                    _multiple_of_15,
+                ),
+                vol.Required(
+                    CONF_DISCHARGE_WINDOW_MINUTES,
+                    default=current.get(
+                        CONF_DISCHARGE_WINDOW_MINUTES,
+                        DEFAULT_DISCHARGE_WINDOW_MINUTES,
+                    ),
+                ): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(min=15, max=720),
+                    _multiple_of_15,
+                ),
+                vol.Required(
+                    CONF_ROUND_TRIP_EFFICIENCY,
+                    default=current.get(
+                        CONF_ROUND_TRIP_EFFICIENCY,
+                        DEFAULT_ROUND_TRIP_EFFICIENCY,
+                    ),
+                ): vol.All(vol.Coerce(int), vol.Range(min=50, max=100)),
+                vol.Required(
+                    CONF_MINIMUM_NET_SAVINGS,
+                    default=current.get(
+                        CONF_MINIMUM_NET_SAVINGS,
+                        DEFAULT_MINIMUM_NET_SAVINGS,
+                    ),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)

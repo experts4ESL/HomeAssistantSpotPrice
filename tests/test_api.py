@@ -8,12 +8,14 @@ import pytest
 
 from custom_components.oeko_spot.api import (
     OekoSpotInvalidDataError,
+    best_future_energy_plan,
     best_price_cycle,
     chart_points,
     cheapest_window,
     dataset_from_dict,
     dataset_to_dict,
     day_statistics,
+    energy_plan_to_dict,
     find_price_plateaus,
     parse_payload,
     plateau_to_dict,
@@ -79,8 +81,7 @@ def test_price_level_uses_daily_rank() -> None:
     dataset = parse(payload(start, list(range(1, 11))), start)
     assert price_level(dataset, start, VIENNA) == "very_low"
     assert (
-        price_level(dataset, start + timedelta(minutes=9 * 15), VIENNA)
-        == "very_high"
+        price_level(dataset, start + timedelta(minutes=9 * 15), VIENNA) == "very_high"
     )
 
 
@@ -122,9 +123,9 @@ def test_complete_100_interval_winter_day() -> None:
         "interval": 15,
         "data": [
             {
-                "date": (
-                    utc_start + timedelta(minutes=15 * index)
-                ).astimezone(VIENNA).isoformat(),
+                "date": (utc_start + timedelta(minutes=15 * index))
+                .astimezone(VIENNA)
+                .isoformat(),
                 "value": 1,
             }
             for index in range(100)
@@ -256,6 +257,84 @@ def test_price_cycle_requires_low_before_high() -> None:
         minimum_minutes=60,
     )
     assert best_price_cycle(low, high) is None
+
+
+def test_future_energy_plan_ignores_elapsed_intervals_and_applies_losses() -> None:
+    start = datetime(2026, 7, 24, tzinfo=VIENNA)
+    values = [0, 0, 0, 0, 2, 2, 2, 2, 10, 30, 30, 30, 30]
+    dataset = parse(payload(start, values), start)
+
+    plan = best_future_energy_plan(
+        dataset,
+        start + timedelta(hours=1),
+        charge_minutes=60,
+        discharge_minutes=60,
+        round_trip_efficiency=0.8,
+    )
+
+    assert plan is not None
+    assert plan.charge.start == start + timedelta(hours=1)
+    assert plan.discharge.start == start + timedelta(hours=2, minutes=15)
+    assert plan.gross_spread == pytest.approx(28.0)
+    assert plan.net_savings == pytest.approx(27.05)
+
+
+def test_future_energy_plan_supports_slow_and_fast_profiles() -> None:
+    start = datetime(2026, 7, 24, tzinfo=VIENNA)
+    values = [1] * 20 + [20] * 8
+    dataset = parse(payload(start, values), start)
+
+    fast = best_future_energy_plan(
+        dataset,
+        start,
+        charge_minutes=60,
+        discharge_minutes=60,
+        round_trip_efficiency=0.85,
+    )
+    slow = best_future_energy_plan(
+        dataset,
+        start,
+        charge_minutes=300,
+        discharge_minutes=60,
+        round_trip_efficiency=0.85,
+    )
+
+    assert fast is not None
+    assert slow is not None
+    assert energy_plan_to_dict(fast)["charge_duration_minutes"] == 60
+    assert energy_plan_to_dict(slow)["charge_duration_minutes"] == 300
+    assert slow.charge.end <= slow.discharge.start
+
+
+def test_future_energy_plan_requires_charge_before_discharge() -> None:
+    start = datetime(2026, 7, 24, tzinfo=VIENNA)
+    dataset = parse(payload(start, [1, 1, 1, 1]), start)
+
+    assert (
+        best_future_energy_plan(
+            dataset,
+            start,
+            charge_minutes=60,
+            discharge_minutes=60,
+            round_trip_efficiency=0.85,
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize("efficiency", [0, -0.1, 1.01])
+def test_future_energy_plan_rejects_invalid_efficiency(efficiency: float) -> None:
+    start = datetime(2026, 7, 24, tzinfo=VIENNA)
+    dataset = parse(payload(start, [1] * 8), start)
+
+    with pytest.raises(ValueError):
+        best_future_energy_plan(
+            dataset,
+            start,
+            charge_minutes=60,
+            discharge_minutes=60,
+            round_trip_efficiency=efficiency,
+        )
 
 
 def test_shifted_full_count_is_not_complete() -> None:
